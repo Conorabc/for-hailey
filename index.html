@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>For Hailey</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+    background: #07060d;
+    /* near-black with a faint violet undertone */
+    background: radial-gradient(circle at 50% 45%, #14092a 0%, #08050f 55%, #050308 100%);
+    touch-action: none;
+    cursor: pointer;
+  }
+  canvas { display: block; }
+  #hint {
+    position: fixed;
+    bottom: 22px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 14px;
+    letter-spacing: 0.5px;
+    color: rgba(200, 170, 255, 0.45);
+    pointer-events: none;
+    transition: opacity 1.2s ease;
+    opacity: 0;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hint">touch the light</div>
+<script>
+(() => {
+  "use strict";
+
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d", { alpha: true });
+  const hint = document.getElementById("hint");
+
+  let W = 0, H = 0, DPR = 1;
+
+  // ---- Purple palette (Hailey's favorite color) -----------------------------
+  // Mostly glowing violets/lavenders, with a few soft-white sparkle particles.
+  const PALETTE = [
+    "#b388ff", // light violet
+    "#9c5dff", // violet
+    "#c77dff", // lavender-magenta
+    "#7b3ff2", // deep purple
+    "#d8b9ff", // pale lavender
+    "#ffffff", // white sparkle (rare)
+  ];
+  // weight: white should be uncommon
+  const PALETTE_WEIGHTS = [22, 22, 20, 14, 14, 8];
+
+  function pickColor() {
+    let total = 0;
+    for (const w of PALETTE_WEIGHTS) total += w;
+    let r = Math.random() * total;
+    for (let i = 0; i < PALETTE.length; i++) {
+      r -= PALETTE_WEIGHTS[i];
+      if (r <= 0) return PALETTE[i];
+    }
+    return PALETTE[0];
+  }
+
+  // ---- Pre-rendered glow sprite (fast additive glow) ------------------------
+  const glowCache = {};
+  function getGlowSprite(color, radius) {
+    const key = color + "|" + radius;
+    if (glowCache[key]) return glowCache[key];
+    const size = radius * 2;
+    const off = document.createElement("canvas");
+    off.width = off.height = size;
+    const octx = off.getContext("2d");
+    const g = octx.createRadialGradient(radius, radius, 0, radius, radius, radius);
+    g.addColorStop(0, color);
+    g.addColorStop(0.25, color);
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    octx.fillStyle = g;
+    octx.beginPath();
+    octx.arc(radius, radius, radius, 0, Math.PI * 2);
+    octx.fill();
+    glowCache[key] = off;
+    return off;
+  }
+
+  // ---- Offscreen canvas used to sample shape/text target points -------------
+  const sampler = document.createElement("canvas");
+  const sctx = sampler.getContext("2d", { willReadFrequently: true });
+
+  // Collect points where the offscreen drawing is opaque.
+  function collectPoints(step) {
+    const img = sctx.getImageData(0, 0, sampler.width, sampler.height).data;
+    const pts = [];
+    for (let y = 0; y < sampler.height; y += step) {
+      for (let x = 0; x < sampler.width; x += step) {
+        const a = img[(y * sampler.width + x) * 4 + 3];
+        if (a > 128) pts.push({ x, y });
+      }
+    }
+    return pts;
+  }
+
+  function prepSampler() {
+    sampler.width = W;
+    sampler.height = H;
+  }
+
+  function sampleText(text) {
+    prepSampler();
+    sctx.clearRect(0, 0, W, H);
+    sctx.fillStyle = "#fff";
+    sctx.textAlign = "center";
+    sctx.textBaseline = "middle";
+    let fs = H * 0.42;
+    const font = (s) =>
+      `700 ${s}px "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif`;
+    sctx.font = font(fs);
+    // shrink to fit within 86% of width
+    while (sctx.measureText(text).width > W * 0.86 && fs > 12) {
+      fs *= 0.94;
+      sctx.font = font(fs);
+    }
+    sctx.fillText(text, W / 2, H / 2);
+    const step = Math.max(3, Math.round(Math.min(W, H) / 220));
+    return collectPoints(step);
+  }
+
+  function sampleHeart() {
+    prepSampler();
+    sctx.clearRect(0, 0, W, H);
+    sctx.fillStyle = "#fff";
+    // parametric heart; x in [-16,16], y in [-17,12]
+    const scale = (H * 0.42) / 30;
+    const cx = W / 2;
+    const cy = H / 2;
+    sctx.beginPath();
+    for (let t = 0; t <= Math.PI * 2 + 0.05; t += 0.01) {
+      const hx = 16 * Math.pow(Math.sin(t), 3);
+      const hy =
+        13 * Math.cos(t) -
+        5 * Math.cos(2 * t) -
+        2 * Math.cos(3 * t) -
+        Math.cos(4 * t);
+      const px = cx + hx * scale;
+      const py = cy - hy * scale; // flip y for screen
+      if (t === 0) sctx.moveTo(px, py);
+      else sctx.lineTo(px, py);
+    }
+    sctx.closePath();
+    sctx.fill();
+    const step = Math.max(3, Math.round(Math.min(W, H) / 220));
+    return collectPoints(step);
+  }
+
+  // ---- Particles ------------------------------------------------------------
+  let particles = [];
+  let PARTICLE_COUNT = 2600;
+
+  function computeCount() {
+    const area = W * H;
+    // scale with screen, but stay phone-friendly
+    PARTICLE_COUNT = Math.max(900, Math.min(3200, Math.round(area / 700)));
+  }
+
+  function makeParticle() {
+    return {
+      x: Math.random() * W,
+      y: Math.random() * H,
+      vx: 0,
+      vy: 0,
+      tx: W / 2,
+      ty: H / 2,
+      size: 1.1 + Math.random() * 1.9,
+      color: pickColor(),
+      ease: 0.05 + Math.random() * 0.07,
+      tw: Math.random() * Math.PI * 2, // twinkle phase
+      tws: 0.02 + Math.random() * 0.04, // twinkle speed
+    };
+  }
+
+  function initParticles() {
+    particles = new Array(PARTICLE_COUNT);
+    for (let i = 0; i < PARTICLE_COUNT; i++) particles[i] = makeParticle();
+  }
+
+  // Assign current particle targets from a set of sampled points.
+  function assignTargets(points) {
+    const n = PARTICLE_COUNT;
+    if (points.length === 0) {
+      // fallback: gather to center
+      for (const p of particles) {
+        p.tx = W / 2;
+        p.ty = H / 2;
+      }
+      return;
+    }
+    // shuffle a copy of points (Fisher-Yates) so morphs look organic
+    const src = points.slice();
+    for (let i = src.length - 1; i > 0; i--) {
+      const j = (Math.random() * (i + 1)) | 0;
+      const t = src[i];
+      src[i] = src[j];
+      src[j] = t;
+    }
+    for (let i = 0; i < n; i++) {
+      const pt = src[i % src.length];
+      // small jitter so overlapping particles on the same point spread out
+      particles[i].tx = pt.x + (Math.random() - 0.5) * 2.5;
+      particles[i].ty = pt.y + (Math.random() - 0.5) * 2.5;
+    }
+  }
+
+  // ---- Phase state machine --------------------------------------------------
+  // intro scatter -> Hailey -> heart -> I love you -> (loop)
+  const SHAPES = [
+    { type: "text", value: "Hailey" },
+    { type: "heart" },
+    { type: "text", value: "I love you" },
+  ];
+  let shapeIndex = 0;
+  let phaseStart = 0;
+  const HOLD_MS = 3600; // time held in formation
+  const MORPH_MS = 1600; // time particles drift into next shape
+  let phase = "intro";
+  let introUntil = 0;
+
+  function applyShape(i) {
+    const s = SHAPES[i];
+    const pts = s.type === "heart" ? sampleHeart() : sampleText(s.value);
+    assignTargets(pts);
+  }
+
+  function startIntro(now) {
+    phase = "intro";
+    introUntil = now + 2200;
+    // give each particle a swirling outward target initially handled by motion
+    for (const p of particles) {
+      p.tx = W / 2 + (Math.random() - 0.5) * W * 0.9;
+      p.ty = H / 2 + (Math.random() - 0.5) * H * 0.9;
+    }
+    phaseStart = now;
+  }
+
+  // ---- Pointer interaction --------------------------------------------------
+  const pointer = { x: -9999, y: -9999, active: false };
+  const REPEL_R = 90;
+  const REPEL_R2 = REPEL_R * REPEL_R;
+
+  function setPointer(e, active) {
+    const t = e.touches && e.touches[0] ? e.touches[0] : e;
+    pointer.x = t.clientX;
+    pointer.y = t.clientY;
+    pointer.active = active;
+  }
+  canvas.addEventListener("mousemove", (e) => setPointer(e, true));
+  canvas.addEventListener("mouseleave", () => (pointer.active = false));
+  canvas.addEventListener("touchstart", (e) => setPointer(e, true), { passive: true });
+  canvas.addEventListener("touchmove", (e) => setPointer(e, true), { passive: true });
+  canvas.addEventListener("touchend", () => (pointer.active = false), { passive: true });
+
+  // ---- Resize ---------------------------------------------------------------
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = Math.floor(W * DPR);
+    canvas.height = Math.floor(H * DPR);
+    canvas.style.width = W + "px";
+    canvas.style.height = H + "px";
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    computeCount();
+    if (particles.length !== PARTICLE_COUNT) initParticles();
+    // re-apply current shape at new size
+    if (phase === "shape") applyShape(shapeIndex);
+  }
+  window.addEventListener("resize", resize);
+
+  // ---- Main loop ------------------------------------------------------------
+  let started = false;
+  function tick(now) {
+    requestAnimationFrame(tick);
+
+    // phase transitions
+    if (phase === "intro") {
+      if (now >= introUntil) {
+        phase = "shape";
+        shapeIndex = 0;
+        applyShape(shapeIndex);
+        phaseStart = now;
+      }
+    } else if (phase === "shape") {
+      if (now - phaseStart > HOLD_MS + MORPH_MS) {
+        shapeIndex = (shapeIndex + 1) % SHAPES.length;
+        applyShape(shapeIndex);
+        phaseStart = now;
+      }
+    }
+
+    // clear with slight trail for a soft motion-blur glow
+    ctx.globalCompositeOperation = "source-over";
+    ctx.fillStyle = "rgba(7, 5, 14, 0.28)";
+    ctx.fillRect(0, 0, W, H);
+
+    // additive blending for glow
+    ctx.globalCompositeOperation = "lighter";
+
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+
+      // ease toward target
+      let dx = p.tx - p.x;
+      let dy = p.ty - p.y;
+      p.vx += dx * p.ease;
+      p.vy += dy * p.ease;
+
+      // pointer repulsion
+      if (pointer.active) {
+        const px = p.x - pointer.x;
+        const py = p.y - pointer.y;
+        const d2 = px * px + py * py;
+        if (d2 < REPEL_R2 && d2 > 0.01) {
+          const d = Math.sqrt(d2);
+          const force = (1 - d / REPEL_R) * 14;
+          p.vx += (px / d) * force;
+          p.vy += (py / d) * force;
+        }
+      }
+
+      // friction
+      p.vx *= 0.82;
+      p.vy *= 0.82;
+      p.x += p.vx;
+      p.y += p.vy;
+
+      // twinkle
+      p.tw += p.tws;
+      const tw = 0.65 + 0.35 * Math.sin(p.tw);
+
+      const r = p.size * 3.2;
+      const sprite = getGlowSprite(p.color, Math.max(4, Math.round(r)));
+      const s = sprite.width;
+      ctx.globalAlpha = tw;
+      ctx.drawImage(sprite, p.x - s / 2, p.y - s / 2);
+    }
+    ctx.globalAlpha = 1;
+
+    if (!started && now > 600) {
+      started = true;
+      hint.style.opacity = "1";
+      setTimeout(() => (hint.style.opacity = "0"), 5200);
+    }
+  }
+
+  // ---- Boot -----------------------------------------------------------------
+  function boot() {
+    resize();
+    initParticles();
+    startIntro(performance.now());
+    requestAnimationFrame(tick);
+  }
+  boot();
+})();
+</script>
+</body>
+</html>
