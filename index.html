@@ -4,9 +4,30 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>For Hailey</title>
+
+<!-- keep this private gift out of search engines -->
+<meta name="robots" content="noindex, nofollow" />
+<!-- mobile browser chrome matches the dark violet -->
+<meta name="theme-color" content="#0c0720" />
+<!-- 💜 favicon -->
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%92%9C</text></svg>" />
+
+<!-- link preview card (shows when the URL is texted/shared) -->
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://conorabc.github.io/for-hailey/" />
+<meta property="og:title" content="For Hailey 💜" />
+<meta property="og:description" content="something I made for you. tap the light." />
+<meta property="og:image" content="https://conorabc.github.io/for-hailey/preview.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="For Hailey 💜" />
+<meta name="twitter:description" content="something I made for you. tap the light." />
+<meta name="twitter:image" content="https://conorabc.github.io/for-hailey/preview.png" />
+
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Crafty+Girls&display=swap" rel="stylesheet" />
 <style>
   html, body {
     margin: 0;
@@ -24,11 +45,10 @@
     left: 0;
     right: 0;
     text-align: center;
-    font-family: "Playfair Display", Georgia, serif;
-    font-style: italic;
-    font-size: 15px;
-    letter-spacing: 1px;
-    color: rgba(214, 188, 255, 0.4);
+    font-family: "Crafty Girls", "Comic Sans MS", cursive;
+    font-size: 17px;
+    letter-spacing: 0.5px;
+    color: rgba(214, 188, 255, 0.45);
     pointer-events: none;
     transition: opacity 1.4s ease;
     opacity: 0;
@@ -37,7 +57,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="hint">touch the light</div>
+<div id="hint">touch the light &middot; tap to continue</div>
 <script>
 (() => {
   "use strict";
@@ -47,7 +67,7 @@
   const hint = document.getElementById("hint");
 
   let W = 0, H = 0, DPR = 1;
-  const FONT_FAMILY = '"Playfair Display", Georgia, serif';
+  const FONT_FAMILY = '"Crafty Girls", "Comic Sans MS", cursive';
 
   // ---- Cohesive violet gradient (pale lavender -> deep violet) --------------
   const STOPS = [
@@ -139,10 +159,10 @@
     sctx.fillStyle = "#fff";
     sctx.textAlign = "center";
     sctx.textBaseline = "middle";
-    let fs = H * 0.34;
-    const font = (s) => `700 ${s}px ${FONT_FAMILY}`;
+    let fs = H * 0.32;
+    const font = (s) => `${s}px ${FONT_FAMILY}`;
     sctx.font = font(fs);
-    while (sctx.measureText(text).width > W * 0.82 && fs > 12) {
+    while (sctx.measureText(text).width > W * 0.84 && fs > 12) {
       fs *= 0.94;
       sctx.font = font(fs);
     }
@@ -196,9 +216,11 @@
     };
   }
 
-  function initParticles() {
-    particles = new Array(PARTICLE_COUNT);
-    for (let i = 0; i < PARTICLE_COUNT; i++) particles[i] = makeParticle();
+  // Add/remove particles to match the target count WITHOUT resetting the ones
+  // that already exist (so a resize doesn't re-scatter the formation).
+  function reconcileCount() {
+    while (particles.length < PARTICLE_COUNT) particles.push(makeParticle());
+    if (particles.length > PARTICLE_COUNT) particles.length = PARTICLE_COUNT;
   }
 
   function assignTargets(points, now) {
@@ -242,6 +264,22 @@
     const s = SHAPES[i];
     assignTargets(s.type === "heart" ? sampleHeart() : sampleText(s.value), now);
   }
+  // Tap handler: burst the particles outward, then form the next shape.
+  function scatterAndAdvance() {
+    const now = performance.now();
+    for (const p of particles) {
+      const ang = Math.random() * Math.PI * 2;
+      const sp = 7 + Math.random() * 11;
+      p.vx += Math.cos(ang) * sp;
+      p.vy += Math.sin(ang) * sp;
+      p.delay = Math.random() * 380; // re-stagger the reform
+    }
+    if (phase === "intro") { phase = "shape"; shapeIndex = 0; }
+    else { shapeIndex = (shapeIndex + 1) % SHAPES.length; }
+    applyShape(shapeIndex, now);
+    phaseStart = now;
+  }
+
   function startIntro(now) {
     phase = "intro";
     introUntil = now + 1900;
@@ -257,20 +295,34 @@
   }
 
   // ---- Pointer --------------------------------------------------------------
+  // Drag/hover repels the light; a quick tap scatters it and advances the shape.
   const pointer = { x: -9999, y: -9999, active: false };
   const REPEL_R = 95, REPEL_R2 = REPEL_R * REPEL_R;
-  function setPointer(e, active) {
-    const t = e.touches && e.touches[0] ? e.touches[0] : e;
-    pointer.x = t.clientX; pointer.y = t.clientY; pointer.active = active;
-  }
-  canvas.addEventListener("mousemove", (e) => setPointer(e, true));
-  canvas.addEventListener("mouseleave", () => (pointer.active = false));
-  canvas.addEventListener("touchstart", (e) => setPointer(e, true), { passive: true });
-  canvas.addEventListener("touchmove", (e) => setPointer(e, true), { passive: true });
-  canvas.addEventListener("touchend", () => (pointer.active = false), { passive: true });
+  let downX = 0, downY = 0, downT = 0, isDown = false, moved = false;
+
+  canvas.addEventListener("pointerdown", (e) => {
+    isDown = true; moved = false;
+    downX = e.clientX; downY = e.clientY; downT = performance.now();
+    pointer.x = e.clientX; pointer.y = e.clientY; pointer.active = true;
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    pointer.x = e.clientX; pointer.y = e.clientY; pointer.active = true;
+    if (isDown) {
+      const dx = e.clientX - downX, dy = e.clientY - downY;
+      if (dx * dx + dy * dy > 100) moved = true; // >10px = a drag, not a tap
+    }
+  });
+  canvas.addEventListener("pointerup", () => {
+    pointer.active = false;
+    if (isDown && !moved && performance.now() - downT < 600) scatterAndAdvance();
+    isDown = false;
+  });
+  canvas.addEventListener("pointerleave", () => { pointer.active = false; isDown = false; });
 
   // ---- Resize ---------------------------------------------------------------
-  function resize() {
+  let lastW = 0, lastH = 0, resizeTimer = 0;
+
+  function applyCanvasSize() {
     DPR = Math.min(window.devicePixelRatio || 1, 2);
     W = window.innerWidth; H = window.innerHeight;
     canvas.width = Math.floor(W * DPR);
@@ -278,11 +330,26 @@
     canvas.style.width = W + "px";
     canvas.style.height = H + "px";
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+
+  function resize() {
+    const nw = window.innerWidth, nh = window.innerHeight;
+    // Mobile address bars show/hide, nudging height by ~60-120px. Treat those as
+    // cosmetic: keep the canvas covering the viewport but don't recompute targets
+    // (which would visibly re-scatter the formation).
+    const cosmetic =
+      particles.length > 0 && nw === lastW && Math.abs(nh - lastH) < 160;
+    lastW = nw; lastH = nh;
+    applyCanvasSize();
+    if (cosmetic) return;
     computeCount();
-    if (particles.length !== PARTICLE_COUNT) initParticles();
+    reconcileCount();
     if (phase === "shape") applyShape(shapeIndex, performance.now());
   }
-  window.addEventListener("resize", resize);
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(resize, 120);
+  });
 
   // ---- Loop -----------------------------------------------------------------
   let started = false;
@@ -355,15 +422,14 @@
 
   // ---- Boot (wait for font so text samples crisply) -------------------------
   function boot() {
-    resize();
-    initParticles();
+    resize(); // sizes the canvas and creates the particles
     startIntro(performance.now());
     requestAnimationFrame(tick);
   }
   if (document.fonts && document.fonts.load) {
     Promise.race([
       Promise.all([
-        document.fonts.load('700 80px "Playfair Display"'),
+        document.fonts.load('40px "Crafty Girls"'),
         document.fonts.ready,
       ]),
       new Promise((res) => setTimeout(res, 2500)),
