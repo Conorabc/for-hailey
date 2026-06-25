@@ -38,7 +38,7 @@
     touch-action: none;
     cursor: crosshair;
   }
-  canvas { display: block; }
+  canvas { display: block; transition: opacity 1.1s ease; }
   #hint {
     position: fixed;
     bottom: 26px;
@@ -389,6 +389,8 @@
     if (onLove !== gifShown) {
       gifShown = onLove;
       gifEl.classList.toggle("show", onLove);
+      // fade the particle layer out so the words don't show behind the cat
+      canvas.style.opacity = onLove ? "0" : "1";
     }
 
     // light, clean fade (minimal trail); normal blending keeps colors true
